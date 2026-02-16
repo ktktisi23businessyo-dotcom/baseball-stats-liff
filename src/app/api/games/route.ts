@@ -26,44 +26,24 @@ export async function GET() {
       return NextResponse.json({ ok: true, games: [] });
     }
 
-    // 2) stats（試合に入力した user_id を拾う）
+    // 2) stats から「その試合に入力した人の名前」を JOIN で取る
+    // ※ stats.user_id -> users.id の外部キーがある前提
     const { data: stats, error: statsErr } = await supabase
       .from("stats")
-      .select("game_id, user_id")
+      .select("game_id, users(display_name)")
       .in("game_id", gameIds);
 
     if (statsErr) {
       return NextResponse.json({ ok: false, error: statsErr.message }, { status: 500 });
     }
 
-    // user_id 一覧（重複排除）
-    const userIds = Array.from(
-      new Set((stats ?? []).map((s: any) => s.user_id).filter(Boolean))
-    );
-
-    // 3) users（display_name を user_id で引く）
-    const userNameById: Record<string, string> = {};
-    if (userIds.length > 0) {
-      const { data: users, error: usersErr } = await supabase
-        .from("users")
-        .select("id, display_name")
-        .in("id", userIds);
-
-      if (usersErr) {
-        return NextResponse.json({ ok: false, error: usersErr.message }, { status: 500 });
-      }
-
-      for (const u of users ?? []) {
-        userNameById[String((u as any).id)] = String((u as any).display_name ?? "（名前未設定）");
-      }
-    }
-
-    // 4) game_id => submitted_names を作る
+    // 3) game_id => submitted_names
     const submittedNamesByGameId: Record<string, string[]> = {};
+
     for (const row of stats ?? []) {
       const gid = String((row as any).game_id);
-      const uid = String((row as any).user_id);
-      const name = userNameById[uid] ?? "（名前未設定）";
+      const name =
+        String((row as any).users?.display_name ?? "").trim() || "（名前未設定）";
 
       if (!submittedNamesByGameId[gid]) submittedNamesByGameId[gid] = [];
       submittedNamesByGameId[gid].push(name);
@@ -74,7 +54,7 @@ export async function GET() {
       submittedNamesByGameId[gid] = Array.from(new Set(submittedNamesByGameId[gid]));
     }
 
-    // 5) gamesに付与して返す
+    // 4) gamesに付与
     const enriched = (games ?? []).map((g: any) => ({
       ...g,
       submitted_names: submittedNamesByGameId[String(g.id)] ?? [],

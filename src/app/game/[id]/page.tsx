@@ -8,7 +8,7 @@ type LiffProfile = { userId: string; displayName: string };
 type Liff = {
   init: (arg: { liffId: string }) => Promise<void>;
   isLoggedIn: () => boolean;
-  login: (arg?: { redirectUri?: string }) => void; // ✅ redirectUri対応
+  login: () => void;
   getProfile: () => Promise<LiffProfile>;
   isInClient: () => boolean;
 };
@@ -58,6 +58,31 @@ export default function GamePage() {
     return false;
   };
 
+  const ensureLineUser = async (): Promise<{ line_user_id: string; display_name: string } | null> => {
+    // すでに持ってるならそれを使う
+    if (lineUserId) return { line_user_id: lineUserId, display_name: displayName };
+
+    // LIFFが無いなら無理
+    if (!window.liff) return null;
+
+    // LINE外（ローカルなど）ならDEVで通す
+    if (!window.liff.isInClient()) {
+      setLineUserId("DEV_USER");
+      setDisplayName("Dev User");
+      return { line_user_id: "DEV_USER", display_name: "Dev User" };
+    }
+
+    // LINE内：init済み前提だが、念のため再試行
+    try {
+      const profile = await window.liff.getProfile();
+      setLineUserId(profile.userId);
+      setDisplayName(profile.displayName);
+      return { line_user_id: profile.userId, display_name: profile.displayName };
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -72,7 +97,7 @@ export default function GamePage() {
           return;
         }
 
-        // LINE外（ローカルなど）→開発モード
+        // LINE外：開発モード
         if (!window.liff.isInClient()) {
           setLineUserId("DEV_USER");
           setDisplayName("Dev User");
@@ -85,10 +110,10 @@ export default function GamePage() {
         setStatus("LIFF初期化中…");
         await window.liff.init({ liffId });
 
-        // ✅ ログインしてないなら、今のURLに戻す
+        // ※ LINE内でも環境によっては isLoggedIn が false になることがある
         if (!window.liff.isLoggedIn()) {
           setStatus("LINEログインへ遷移します…");
-          window.liff.login({ redirectUri: window.location.href });
+          window.liff.login();
           return;
         }
 
@@ -113,22 +138,23 @@ export default function GamePage() {
         return;
       }
 
-      // LINE内なのに userIdが無いなら、押せないようにする（保険）
-      if (inClient && !lineUserId) {
-        setStatus("userIdが取得できていません（ログイン/プロフィール取得中の可能性）");
+      setSaving(true);
+      setStatus("保存準備中…");
+
+      const user = await ensureLineUser();
+      if (!user) {
+        setStatus("userId取得に失敗（LINE内で開けているか確認してください）");
         return;
       }
 
-      setSaving(true);
       setStatus("保存中…");
-
       const res = await fetch("/api/stats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           game_id: gameId,
-          line_user_id: lineUserId || "DEV_USER",
-          display_name: displayName || "Dev User",
+          line_user_id: user.line_user_id,
+          display_name: user.display_name,
           ab,
           h,
           outs,
@@ -175,12 +201,10 @@ export default function GamePage() {
         <div>状態：{status}</div>
         <div style={{ fontSize: 12, color: "#666" }}>inClient: {String(inClient)}</div>
 
-        {lineUserId ? (
+        {lineUserId && (
           <div style={{ fontSize: 12, color: "#666" }}>
             {displayName}（{lineUserId}）
           </div>
-        ) : (
-          <div style={{ fontSize: 12, color: "#666" }}>ユーザー情報取得中…</div>
         )}
       </div>
 

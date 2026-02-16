@@ -59,7 +59,6 @@ export default function GamePage() {
     if (lineUserId) return { line_user_id: lineUserId, display_name: displayName };
     if (!window.liff) return null;
 
-    // ✅ DEVはローカルだけ許可（本番では絶対DEVに落ちない）
     if (isLocalhost && !window.liff.isInClient()) {
       setLineUserId("DEV_USER");
       setDisplayName("Dev User");
@@ -93,7 +92,7 @@ export default function GamePage() {
         const _inClient = window.liff.isInClient();
         setInClient(_inClient);
 
-        // ✅ ローカルのみ開発モード
+        // ローカルだけ開発モード
         if (isLocalhost && !_inClient) {
           setLineUserId("DEV_USER");
           setDisplayName("Dev User");
@@ -105,12 +104,14 @@ export default function GamePage() {
         setStatus("LIFF初期化中…");
         await window.liff.init({ liffId });
 
+        // ✅ ここが安定化の本体：ログインが必要なら「/」に戻してredirectを付ける
         if (!window.liff.isLoggedIn()) {
           setStatus("LINEログインへ遷移します…");
 
-          // ✅ 一覧に戻っちゃうのを止める（戻り先を保持）
-          window.liff.login({ redirectUri: window.location.href });
+          const redirectUri =
+            `${window.location.origin}/?redirect=${encodeURIComponent(`/game/${gameId}`)}`;
 
+          window.liff.login({ redirectUri });
           return;
         }
 

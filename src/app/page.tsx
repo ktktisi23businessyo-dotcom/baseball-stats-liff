@@ -16,16 +16,11 @@ export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // ✅ LIFFログイン後に "/?liff.state=..." で戻ってきたら復帰
+  // ✅ ログイン後に /?redirect=/game/... で戻ってきたら復帰
   useEffect(() => {
-    const state = searchParams.get("liff.state");
-    if (state) {
-      const dest = decodeURIComponent(state);
-
-      // "/game/..." のような相対パスだけ許可して安全に復帰
-      if (dest.startsWith("/")) {
-        router.replace(dest);
-      }
+    const redirect = searchParams.get("redirect");
+    if (redirect && redirect.startsWith("/")) {
+      router.replace(redirect);
     }
   }, [searchParams, router]);
 
@@ -53,6 +48,9 @@ export default function Home() {
 
   return (
     <main style={{ padding: 16 }}>
+      {/* 反映確認用。消したければ消してOK */}
+      <div style={{ color: "red", fontWeight: 900 }}>BUILD_MARK: 999</div>
+
       <h1 style={{ fontSize: 20, fontWeight: 800 }}>試合一覧</h1>
       <p style={{ marginTop: 8 }}>{status}</p>
 

@@ -6,7 +6,8 @@ import { useParams, useRouter } from "next/navigation";
 type LiffProfile = { userId: string; displayName: string };
 
 type Liff = {
-  init: (arg: { liffId: string }) => Promise<void>;
+  init: (arg: { liffId: string; withLoginOnExternalBrowser?: boolean }) => Promise<void>;
+  ready: Promise<void>;
   isLoggedIn: () => boolean;
   login: (arg?: { redirectUri?: string }) => void;
   getProfile: () => Promise<LiffProfile>;
@@ -18,6 +19,8 @@ declare global {
     liff: Liff;
   }
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default function GamePage() {
   const params = useParams<{ id: string }>();
@@ -36,10 +39,7 @@ export default function GamePage() {
 
   const [saving, setSaving] = useState(false);
 
-  const isLocalhost =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-
+  // 既存成績ロード
   const loadExisting = async (gid: string, luid: string) => {
     const res = await fetch(
       `/api/stats?game_id=${encodeURIComponent(gid)}&line_user_id=${encodeURIComponent(luid)}`
@@ -55,68 +55,58 @@ export default function GamePage() {
     return false;
   };
 
-  const ensureLineUser = async (): Promise<{ line_user_id: string; display_name: string } | null> => {
-    if (lineUserId) return { line_user_id: lineUserId, display_name: displayName };
-    if (!window.liff) return null;
-
-    if (isLocalhost && !window.liff.isInClient()) {
-      setLineUserId("DEV_USER");
-      setDisplayName("Dev User");
-      return { line_user_id: "DEV_USER", display_name: "Dev User" };
+  // getProfile を少し待ってリトライ（LIFFのclient featuresロード待ち対策）
+  const getProfileWithRetry = async (tries = 3): Promise<LiffProfile> => {
+    let lastErr: any = null;
+    for (let i = 0; i < tries; i++) {
+      try {
+        return await window.liff.getProfile();
+      } catch (e: any) {
+        lastErr = e;
+        await sleep(250 * (i + 1));
+      }
     }
-
-    try {
-      const profile = await window.liff.getProfile();
-      setLineUserId(profile.userId);
-      setDisplayName(profile.displayName);
-      return { line_user_id: profile.userId, display_name: profile.displayName };
-    } catch {
-      return null;
-    }
+    throw lastErr;
   };
 
   useEffect(() => {
     (async () => {
       try {
         const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
-
         if (!liffId) {
-          setStatus("LIFF ID 未設定");
+          setStatus("LIFF ID 未設定（Vercel Envを確認）");
           return;
         }
         if (!window.liff) {
-          setStatus("LIFF SDK読み込み失敗");
-          return;
-        }
-
-        const _inClient = window.liff.isInClient();
-        setInClient(_inClient);
-
-        // ローカルだけ開発モード
-        if (isLocalhost && !_inClient) {
-          setLineUserId("DEV_USER");
-          setDisplayName("Dev User");
-          const loaded = await loadExisting(gameId, "DEV_USER");
-          setStatus(loaded ? "前回入力を読み込みました（開発モード）" : "開発モード：入力してください");
+          setStatus("LIFF SDK読み込み失敗（layout.tsx の script を確認）");
           return;
         }
 
         setStatus("LIFF初期化中…");
-        await window.liff.init({ liffId });
+        await window.liff.init({
+          liffId,
+          // 外部ブラウザに飛ぶ環境でもログインを成立させる保険
+          withLoginOnExternalBrowser: true,
+        });
 
-        // ✅ ここが安定化の本体：ログインが必要なら「/」に戻してredirectを付ける
+        // ✅ ここが重要：client features が揃うまで待つ
+        await window.liff.ready;
+
+        // ✅ isInClient は init/ready 後に評価（先に呼ぶと不安定になることがある）
+        const _inClient = window.liff.isInClient();
+        setInClient(_inClient);
+
+        // ログインしてなければ / に戻してから復帰（戻り先を固定して安定化）
         if (!window.liff.isLoggedIn()) {
           setStatus("LINEログインへ遷移します…");
-
           const redirectUri =
             `${window.location.origin}/?redirect=${encodeURIComponent(`/game/${gameId}`)}`;
-
           window.liff.login({ redirectUri });
           return;
         }
 
         setStatus("プロフィール取得中…");
-        const profile = await window.liff.getProfile();
+        const profile = await getProfileWithRetry(3);
         setLineUserId(profile.userId);
         setDisplayName(profile.displayName);
 
@@ -124,10 +114,11 @@ export default function GamePage() {
         const loaded = await loadExisting(gameId, profile.userId);
         setStatus(loaded ? "前回入力を読み込みました" : "入力してください");
       } catch (e: any) {
+        // ここに「Unable to load client features.」が落ちてくる
         setStatus("例外: " + (e?.message ?? String(e)));
       }
     })();
-  }, [gameId, isLocalhost]);
+  }, [gameId]);
 
   const onSave = async () => {
     try {
@@ -135,24 +126,21 @@ export default function GamePage() {
         setStatus("入力エラー：H は AB を超えられません");
         return;
       }
-
-      setSaving(true);
-      setStatus("保存準備中…");
-
-      const user = await ensureLineUser();
-      if (!user) {
-        setStatus("ユーザー情報取得に失敗（LIFF URLで開けているか確認）");
+      if (!lineUserId) {
+        setStatus("ユーザー情報取得中です（少し待ってから再度保存）");
         return;
       }
 
+      setSaving(true);
       setStatus("保存中…");
+
       const res = await fetch("/api/stats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           game_id: gameId,
-          line_user_id: user.line_user_id,
-          display_name: user.display_name,
+          line_user_id: lineUserId,
+          display_name: displayName,
           ab,
           h,
           outs,
@@ -174,12 +162,16 @@ export default function GamePage() {
     }
   };
 
-  const canSave = !saving && (!!lineUserId || isLocalhost);
+  const canSave = !saving && !!lineUserId;
 
   return (
     <main style={{ padding: 16, display: "grid", gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800 }}>成績入力</h1>
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 800 }}>成績入力</h1>
+          <div style={{ color: "red", fontWeight: 900 }}>★ NEW BUILD CHECK ★</div>
+        </div>
+
         <button
           onClick={() => router.push("/")}
           style={{
@@ -198,7 +190,6 @@ export default function GamePage() {
         <div>game_id: {gameId}</div>
         <div>状態：{status}</div>
         <div style={{ fontSize: 12, color: "#666" }}>inClient: {String(inClient)}</div>
-
         {lineUserId && (
           <div style={{ fontSize: 12, color: "#666" }}>
             {displayName}（{lineUserId}）

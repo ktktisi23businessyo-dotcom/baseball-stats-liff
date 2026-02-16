@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 type Game = {
@@ -12,11 +12,10 @@ type Game = {
   submitted_names: string[];
 };
 
-export default function Home() {
+function HomeInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // ✅ ログイン後に /?redirect=/game/... で戻ってきたら復帰
   useEffect(() => {
     const redirect = searchParams.get("redirect");
     if (redirect && redirect.startsWith("/")) {
@@ -48,9 +47,6 @@ export default function Home() {
 
   return (
     <main style={{ padding: 16 }}>
-      {/* 反映確認用。消したければ消してOK */}
-      <div style={{ color: "red", fontWeight: 900 }}>BUILD_MARK: 999</div>
-
       <h1 style={{ fontSize: 20, fontWeight: 800 }}>試合一覧</h1>
       <p style={{ marginTop: 8 }}>{status}</p>
 
@@ -59,8 +55,13 @@ export default function Home() {
           <li key={g.id} style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12 }}>
             <Link href={`/game/${g.id}`} style={{ textDecoration: "none", color: "inherit" }}>
               <div style={{ fontWeight: 800 }}>{g.game_date}</div>
-              <div style={{ marginTop: 4, color: "#444" }}>vs {g.opponent ?? "（未入力）"}</div>
-              {g.memo && <div style={{ marginTop: 6, color: "#666" }}>{g.memo}</div>}
+              <div style={{ marginTop: 4, color: "#444" }}>
+                vs {g.opponent ?? "（未入力）"}
+              </div>
+
+              {g.memo && (
+                <div style={{ marginTop: 6, color: "#666" }}>{g.memo}</div>
+              )}
 
               {g.submitted_names?.length > 0 && (
                 <div style={{ marginTop: 10, fontSize: 13 }}>
@@ -79,5 +80,13 @@ export default function Home() {
         ))}
       </ul>
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div style={{ padding: 16 }}>読み込み中…</div>}>
+      <HomeInner />
+    </Suspense>
   );
 }

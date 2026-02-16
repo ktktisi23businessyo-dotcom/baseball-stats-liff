@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
 
 type Liff = {
   init: (arg: { liffId: string }) => Promise<void>;
@@ -25,12 +24,14 @@ export default function Home() {
     (async () => {
       try {
         const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
+
         if (!liffId) {
-          setStatus("NEXT_PUBLIC_LIFF_ID が未設定です");
+          setStatus("LIFF ID 未設定");
           return;
         }
+
         if (!window.liff) {
-          setStatus("LIFF SDKの読み込みに失敗しました");
+          setStatus("LIFF SDK読み込み失敗");
           return;
         }
 
@@ -45,20 +46,26 @@ export default function Home() {
 
         setStatus("プロフィール取得中…");
         const profile = await window.liff.getProfile();
+
         setUserId(profile.userId);
         setDisplayName(profile.displayName);
 
-        setStatus("ユーザー登録中…");
-        const { error } = await supabase.from("users").upsert(
-          {
+        // 🔥 ここからAPI経由で登録
+        setStatus("ユーザー登録中(API)…");
+
+        const res = await fetch("/api/upsert-user", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
             line_user_id: profile.userId,
             display_name: profile.displayName,
-          },
-          { onConflict: "line_user_id" }
-        );
+          }),
+        });
 
-        if (error) {
-          setStatus("DBエラー: " + error.message);
+        const json = await res.json().catch(() => ({}));
+
+        if (!res.ok || !json.ok) {
+          setStatus("🔥API経由エラー🔥: " + (json.error ?? res.statusText));
           return;
         }
 

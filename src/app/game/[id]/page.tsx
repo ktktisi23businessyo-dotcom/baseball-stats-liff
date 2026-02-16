@@ -197,6 +197,10 @@ export default function GamePage() {
     <main style={{ padding: 16, display: "grid", gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <h1 style={{ fontSize: 20, fontWeight: 800 }}>成績入力</h1>
+        <div style={{ color: "red", fontWeight: 900 }}>
+  ★ NEW BUILD CHECK ★
+</div>
+
         <button
           onClick={() => router.push("/")}
           style={{

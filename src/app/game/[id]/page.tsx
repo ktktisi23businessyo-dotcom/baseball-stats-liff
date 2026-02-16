@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+
+type LiffProfile = { userId: string; displayName: string };
 
 type Liff = {
   init: (arg: { liffId: string }) => Promise<void>;
   isLoggedIn: () => boolean;
   login: () => void;
-  getProfile: () => Promise<{ userId: string; displayName: string }>;
+  getProfile: () => Promise<LiffProfile>;
   isInClient: () => boolean;
 };
 
@@ -33,6 +35,54 @@ export default function GamePage() {
 
   const [saving, setSaving] = useState(false);
 
+  const inClient = useMemo(() => {
+    try {
+      return typeof window !== "undefined" && window.liff ? window.liff.isInClient() : false;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const loadExisting = async (gid: string, luid: string) => {
+    const res = await fetch(
+      `/api/stats?game_id=${encodeURIComponent(gid)}&line_user_id=${encodeURIComponent(luid)}`
+    );
+    const json = await res.json().catch(() => ({}));
+    if (res.ok && json.ok && json.stats) {
+      setAb(Number(json.stats.ab ?? 0));
+      setH(Number(json.stats.h ?? 0));
+      setOuts(Number(json.stats.outs ?? 0));
+      setEr(Number(json.stats.er ?? 0));
+      return true;
+    }
+    return false;
+  };
+
+  const ensureLineUser = async (): Promise<{ line_user_id: string; display_name: string } | null> => {
+    // すでに持ってるならそれを使う
+    if (lineUserId) return { line_user_id: lineUserId, display_name: displayName };
+
+    // LIFFが無いなら無理
+    if (!window.liff) return null;
+
+    // LINE外（ローカルなど）ならDEVで通す
+    if (!window.liff.isInClient()) {
+      setLineUserId("DEV_USER");
+      setDisplayName("Dev User");
+      return { line_user_id: "DEV_USER", display_name: "Dev User" };
+    }
+
+    // LINE内：init済み前提だが、念のため再試行
+    try {
+      const profile = await window.liff.getProfile();
+      setLineUserId(profile.userId);
+      setDisplayName(profile.displayName);
+      return { line_user_id: profile.userId, display_name: profile.displayName };
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -47,61 +97,34 @@ export default function GamePage() {
           return;
         }
 
-        // 開発モード（LINE外）
+        // LINE外：開発モード
         if (!window.liff.isInClient()) {
           setLineUserId("DEV_USER");
           setDisplayName("Dev User");
-
-          // 既存データ確認
-          const res = await fetch(
-            `/api/stats?game_id=${encodeURIComponent(
-              gameId
-            )}&line_user_id=DEV_USER`
-          );
-          const json = await res.json().catch(() => ({}));
-
-          if (res.ok && json.ok && json.stats) {
-            setAb(Number(json.stats.ab ?? 0));
-            setH(Number(json.stats.h ?? 0));
-            setOuts(Number(json.stats.outs ?? 0));
-            setEr(Number(json.stats.er ?? 0));
-            setStatus("前回入力を読み込みました（開発モード）");
-          } else {
-            setStatus("開発モード：入力してください");
-          }
-
+          const loaded = await loadExisting(gameId, "DEV_USER");
+          setStatus(loaded ? "前回入力を読み込みました（開発モード）" : "開発モード：入力してください");
           return;
         }
 
+        // LINE内
+        setStatus("LIFF初期化中…");
         await window.liff.init({ liffId });
 
+        // ※ LINE内でも環境によっては isLoggedIn が false になることがある
         if (!window.liff.isLoggedIn()) {
+          setStatus("LINEログインへ遷移します…");
           window.liff.login();
           return;
         }
 
+        setStatus("プロフィール取得中…");
         const profile = await window.liff.getProfile();
         setLineUserId(profile.userId);
         setDisplayName(profile.displayName);
 
-        // 🔥 ここが追加：既存成績読み込み
         setStatus("入力済みデータ確認中…");
-        const res = await fetch(
-          `/api/stats?game_id=${encodeURIComponent(
-            gameId
-          )}&line_user_id=${encodeURIComponent(profile.userId)}`
-        );
-        const json = await res.json().catch(() => ({}));
-
-        if (res.ok && json.ok && json.stats) {
-          setAb(Number(json.stats.ab ?? 0));
-          setH(Number(json.stats.h ?? 0));
-          setOuts(Number(json.stats.outs ?? 0));
-          setEr(Number(json.stats.er ?? 0));
-          setStatus("前回入力を読み込みました");
-        } else {
-          setStatus("入力してください");
-        }
+        const loaded = await loadExisting(gameId, profile.userId);
+        setStatus(loaded ? "前回入力を読み込みました" : "入力してください");
       } catch (e: any) {
         setStatus("例外: " + (e?.message ?? String(e)));
       }
@@ -110,25 +133,28 @@ export default function GamePage() {
 
   const onSave = async () => {
     try {
-      if (!lineUserId) {
-        setStatus("userIdが取得できていません");
-        return;
-      }
       if (h > ab) {
         setStatus("入力エラー：H は AB を超えられません");
         return;
       }
 
       setSaving(true);
-      setStatus("保存中…");
+      setStatus("保存準備中…");
 
+      const user = await ensureLineUser();
+      if (!user) {
+        setStatus("userId取得に失敗（LINE内で開けているか確認してください）");
+        return;
+      }
+
+      setStatus("保存中…");
       const res = await fetch("/api/stats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           game_id: gameId,
-          line_user_id: lineUserId,
-          display_name: displayName,
+          line_user_id: user.line_user_id,
+          display_name: user.display_name,
           ab,
           h,
           outs,
@@ -149,6 +175,8 @@ export default function GamePage() {
       setSaving(false);
     }
   };
+
+  const canSave = !saving && (inClient ? !!lineUserId : true);
 
   return (
     <main style={{ padding: 16, display: "grid", gap: 12 }}>
@@ -171,6 +199,8 @@ export default function GamePage() {
       <div>
         <div>game_id: {gameId}</div>
         <div>状態：{status}</div>
+        <div style={{ fontSize: 12, color: "#666" }}>inClient: {String(inClient)}</div>
+
         {lineUserId && (
           <div style={{ fontSize: 12, color: "#666" }}>
             {displayName}（{lineUserId}）
@@ -185,17 +215,17 @@ export default function GamePage() {
 
       <button
         onClick={onSave}
-        disabled={saving}
+        disabled={!canSave}
         style={{
           borderRadius: 12,
           padding: "12px 14px",
           border: "1px solid #0a66c2",
-          background: saving ? "#eee" : "#0a66c2",
-          color: saving ? "#333" : "white",
+          background: !canSave ? "#eee" : "#0a66c2",
+          color: !canSave ? "#333" : "white",
           fontWeight: 800,
         }}
       >
-        {saving ? "保存中…" : "保存する"}
+        {saving ? "保存中…" : canSave ? "保存する" : "ユーザー情報取得中…"}
       </button>
     </main>
   );

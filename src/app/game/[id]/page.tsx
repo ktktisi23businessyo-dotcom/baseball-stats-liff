@@ -8,7 +8,7 @@ type LiffProfile = { userId: string; displayName: string };
 type Liff = {
   init: (arg: { liffId: string }) => Promise<void>;
   isLoggedIn: () => boolean;
-  login: () => void;
+  login: (arg?: { redirectUri?: string }) => void;
   getProfile: () => Promise<LiffProfile>;
   isInClient: () => boolean;
 };
@@ -37,7 +37,9 @@ export default function GamePage() {
 
   const inClient = useMemo(() => {
     try {
-      return typeof window !== "undefined" && window.liff ? window.liff.isInClient() : false;
+      return typeof window !== "undefined" && window.liff
+        ? window.liff.isInClient()
+        : false;
     } catch {
       return false;
     }
@@ -45,7 +47,9 @@ export default function GamePage() {
 
   const loadExisting = async (gid: string, luid: string) => {
     const res = await fetch(
-      `/api/stats?game_id=${encodeURIComponent(gid)}&line_user_id=${encodeURIComponent(luid)}`
+      `/api/stats?game_id=${encodeURIComponent(
+        gid
+      )}&line_user_id=${encodeURIComponent(luid)}`
     );
     const json = await res.json().catch(() => ({}));
     if (res.ok && json.ok && json.stats) {
@@ -58,26 +62,29 @@ export default function GamePage() {
     return false;
   };
 
-  const ensureLineUser = async (): Promise<{ line_user_id: string; display_name: string } | null> => {
-    // すでに持ってるならそれを使う
-    if (lineUserId) return { line_user_id: lineUserId, display_name: displayName };
+  const ensureLineUser = async (): Promise<{
+    line_user_id: string;
+    display_name: string;
+  } | null> => {
+    if (lineUserId)
+      return { line_user_id: lineUserId, display_name: displayName };
 
-    // LIFFが無いなら無理
     if (!window.liff) return null;
 
-    // LINE外（ローカルなど）ならDEVで通す
     if (!window.liff.isInClient()) {
       setLineUserId("DEV_USER");
       setDisplayName("Dev User");
       return { line_user_id: "DEV_USER", display_name: "Dev User" };
     }
 
-    // LINE内：init済み前提だが、念のため再試行
     try {
       const profile = await window.liff.getProfile();
       setLineUserId(profile.userId);
       setDisplayName(profile.displayName);
-      return { line_user_id: profile.userId, display_name: profile.displayName };
+      return {
+        line_user_id: profile.userId,
+        display_name: profile.displayName,
+      };
     } catch {
       return null;
     }
@@ -97,23 +104,29 @@ export default function GamePage() {
           return;
         }
 
-        // LINE外：開発モード
         if (!window.liff.isInClient()) {
           setLineUserId("DEV_USER");
           setDisplayName("Dev User");
           const loaded = await loadExisting(gameId, "DEV_USER");
-          setStatus(loaded ? "前回入力を読み込みました（開発モード）" : "開発モード：入力してください");
+          setStatus(
+            loaded
+              ? "前回入力を読み込みました（開発モード）"
+              : "開発モード：入力してください"
+          );
           return;
         }
 
-        // LINE内
         setStatus("LIFF初期化中…");
         await window.liff.init({ liffId });
 
-        // ※ LINE内でも環境によっては isLoggedIn が false になることがある
         if (!window.liff.isLoggedIn()) {
           setStatus("LINEログインへ遷移します…");
-          window.liff.login();
+
+          // ✅ ここが修正ポイント
+          window.liff.login({
+            redirectUri: window.location.href,
+          });
+
           return;
         }
 
@@ -143,7 +156,9 @@ export default function GamePage() {
 
       const user = await ensureLineUser();
       if (!user) {
-        setStatus("userId取得に失敗（LINE内で開けているか確認してください）");
+        setStatus(
+          "userId取得に失敗（LINE内で開けているか確認してください）"
+        );
         return;
       }
 
@@ -199,7 +214,9 @@ export default function GamePage() {
       <div>
         <div>game_id: {gameId}</div>
         <div>状態：{status}</div>
-        <div style={{ fontSize: 12, color: "#666" }}>inClient: {String(inClient)}</div>
+        <div style={{ fontSize: 12, color: "#666" }}>
+          inClient: {String(inClient)}
+        </div>
 
         {lineUserId && (
           <div style={{ fontSize: 12, color: "#666" }}>
@@ -247,7 +264,11 @@ function NumberField({
         type="number"
         min={0}
         value={Number.isFinite(value) ? value : 0}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onChange={(e) => {
+          const v = e.target.value;
+          const n = v === "" ? 0 : Number(v);
+          onChange(Number.isFinite(n) ? n : 0);
+        }}
         style={{
           border: "1px solid #ddd",
           borderRadius: 12,

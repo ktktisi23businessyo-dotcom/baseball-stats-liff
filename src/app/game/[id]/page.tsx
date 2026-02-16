@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 type LiffProfile = { userId: string; displayName: string };
@@ -25,6 +25,7 @@ export default function GamePage() {
   const gameId = params.id;
 
   const [status, setStatus] = useState("起動中…");
+  const [inClient, setInClient] = useState<boolean>(false);
   const [lineUserId, setLineUserId] = useState<string>("");
   const [displayName, setDisplayName] = useState<string>("");
 
@@ -35,21 +36,13 @@ export default function GamePage() {
 
   const [saving, setSaving] = useState(false);
 
-  const inClient = useMemo(() => {
-    try {
-      return typeof window !== "undefined" && window.liff
-        ? window.liff.isInClient()
-        : false;
-    } catch {
-      return false;
-    }
-  }, []);
+  const isLocalhost =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
   const loadExisting = async (gid: string, luid: string) => {
     const res = await fetch(
-      `/api/stats?game_id=${encodeURIComponent(
-        gid
-      )}&line_user_id=${encodeURIComponent(luid)}`
+      `/api/stats?game_id=${encodeURIComponent(gid)}&line_user_id=${encodeURIComponent(luid)}`
     );
     const json = await res.json().catch(() => ({}));
     if (res.ok && json.ok && json.stats) {
@@ -62,16 +55,12 @@ export default function GamePage() {
     return false;
   };
 
-  const ensureLineUser = async (): Promise<{
-    line_user_id: string;
-    display_name: string;
-  } | null> => {
-    if (lineUserId)
-      return { line_user_id: lineUserId, display_name: displayName };
-
+  const ensureLineUser = async (): Promise<{ line_user_id: string; display_name: string } | null> => {
+    if (lineUserId) return { line_user_id: lineUserId, display_name: displayName };
     if (!window.liff) return null;
 
-    if (!window.liff.isInClient()) {
+    // ✅ DEVはローカルだけ許可（本番では絶対DEVに落ちない）
+    if (isLocalhost && !window.liff.isInClient()) {
       setLineUserId("DEV_USER");
       setDisplayName("Dev User");
       return { line_user_id: "DEV_USER", display_name: "Dev User" };
@@ -81,10 +70,7 @@ export default function GamePage() {
       const profile = await window.liff.getProfile();
       setLineUserId(profile.userId);
       setDisplayName(profile.displayName);
-      return {
-        line_user_id: profile.userId,
-        display_name: profile.displayName,
-      };
+      return { line_user_id: profile.userId, display_name: profile.displayName };
     } catch {
       return null;
     }
@@ -104,15 +90,15 @@ export default function GamePage() {
           return;
         }
 
-        if (!window.liff.isInClient()) {
+        const _inClient = window.liff.isInClient();
+        setInClient(_inClient);
+
+        // ✅ ローカルのみ開発モード
+        if (isLocalhost && !_inClient) {
           setLineUserId("DEV_USER");
           setDisplayName("Dev User");
           const loaded = await loadExisting(gameId, "DEV_USER");
-          setStatus(
-            loaded
-              ? "前回入力を読み込みました（開発モード）"
-              : "開発モード：入力してください"
-          );
+          setStatus(loaded ? "前回入力を読み込みました（開発モード）" : "開発モード：入力してください");
           return;
         }
 
@@ -122,10 +108,8 @@ export default function GamePage() {
         if (!window.liff.isLoggedIn()) {
           setStatus("LINEログインへ遷移します…");
 
-          // ✅ ここが修正ポイント
-          window.liff.login({
-            redirectUri: window.location.href,
-          });
+          // ✅ 一覧に戻っちゃうのを止める（戻り先を保持）
+          window.liff.login({ redirectUri: window.location.href });
 
           return;
         }
@@ -142,7 +126,7 @@ export default function GamePage() {
         setStatus("例外: " + (e?.message ?? String(e)));
       }
     })();
-  }, [gameId]);
+  }, [gameId, isLocalhost]);
 
   const onSave = async () => {
     try {
@@ -156,9 +140,7 @@ export default function GamePage() {
 
       const user = await ensureLineUser();
       if (!user) {
-        setStatus(
-          "userId取得に失敗（LINE内で開けているか確認してください）"
-        );
+        setStatus("ユーザー情報取得に失敗（LIFF URLで開けているか確認）");
         return;
       }
 
@@ -191,16 +173,12 @@ export default function GamePage() {
     }
   };
 
-  const canSave = !saving && (inClient ? !!lineUserId : true);
+  const canSave = !saving && (!!lineUserId || isLocalhost);
 
   return (
     <main style={{ padding: 16, display: "grid", gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <h1 style={{ fontSize: 20, fontWeight: 800 }}>成績入力</h1>
-        <div style={{ color: "red", fontWeight: 900 }}>
-  ★ NEW BUILD CHECK ★
-</div>
-
         <button
           onClick={() => router.push("/")}
           style={{
@@ -218,9 +196,7 @@ export default function GamePage() {
       <div>
         <div>game_id: {gameId}</div>
         <div>状態：{status}</div>
-        <div style={{ fontSize: 12, color: "#666" }}>
-          inClient: {String(inClient)}
-        </div>
+        <div style={{ fontSize: 12, color: "#666" }}>inClient: {String(inClient)}</div>
 
         {lineUserId && (
           <div style={{ fontSize: 12, color: "#666" }}>

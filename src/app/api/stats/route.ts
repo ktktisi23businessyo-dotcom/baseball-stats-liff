@@ -20,32 +20,27 @@ export async function POST(req: Request) {
     const er = Number(body.er ?? 0);
 
     if (!game_id || !line_user_id) {
-      return NextResponse.json(
-        { ok: false, error: "game_id と line_user_id は必須です" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "game_id と line_user_id は必須です" }, { status: 400 });
     }
     if ([ab, h, outs, er].some((n) => Number.isNaN(n) || n < 0)) {
-      return NextResponse.json(
-        { ok: false, error: "数値は0以上で入力してください" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "数値は0以上で入力してください" }, { status: 400 });
     }
     if (h > ab) {
-      return NextResponse.json(
-        { ok: false, error: "H は AB を超えられません" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "H は AB を超えられません" }, { status: 400 });
     }
 
     const supabase = getSupabase();
 
+    // ✅ display_name が無い/空なら line_user_id を入れて NULL を避ける
+    const displayName =
+      typeof body.display_name === "string" && body.display_name.trim() !== ""
+        ? body.display_name.trim()
+        : line_user_id;
+
+    // users（LINEユーザーを確保）
     const { data: users, error: userErr } = await supabase
       .from("users")
-      .upsert(
-        { line_user_id, display_name: body.display_name ?? null },
-        { onConflict: "line_user_id" }
-      )
+      .upsert({ line_user_id, display_name: displayName }, { onConflict: "line_user_id" })
       .select("id")
       .limit(1);
 
@@ -58,10 +53,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "user_id取得失敗" }, { status: 500 });
     }
 
-    const { error: statsErr } = await supabase.from("stats").upsert(
-      { user_id, game_id, ab, h, outs, er },
-      { onConflict: "user_id,game_id" }
-    );
+    // stats（同一ユーザー×同一試合は更新）
+    const { error: statsErr } = await supabase
+      .from("stats")
+      .upsert({ user_id, game_id, ab, h, outs, er }, { onConflict: "user_id,game_id" });
 
     if (statsErr) {
       return NextResponse.json({ ok: false, error: statsErr.message }, { status: 500 });
@@ -81,10 +76,7 @@ export async function GET(req: Request) {
     const line_user_id = String(searchParams.get("line_user_id") ?? "");
 
     if (!game_id || !line_user_id) {
-      return NextResponse.json(
-        { ok: false, error: "game_id と line_user_id は必須です" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "game_id と line_user_id は必須です" }, { status: 400 });
     }
 
     const supabase = getSupabase();

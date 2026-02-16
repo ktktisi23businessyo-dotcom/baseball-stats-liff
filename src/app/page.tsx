@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 type Game = {
   id: string;
@@ -12,6 +13,22 @@ type Game = {
 };
 
 export default function Home() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // ✅ LIFFログイン後に "/?liff.state=..." で戻ってきたら復帰
+  useEffect(() => {
+    const state = searchParams.get("liff.state");
+    if (state) {
+      const dest = decodeURIComponent(state);
+
+      // "/game/..." のような相対パスだけ許可して安全に復帰
+      if (dest.startsWith("/")) {
+        router.replace(dest);
+      }
+    }
+  }, [searchParams, router]);
+
   const [status, setStatus] = useState("読み込み中…");
   const [games, setGames] = useState<Game[]>([]);
 
@@ -44,9 +61,7 @@ export default function Home() {
           <li key={g.id} style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12 }}>
             <Link href={`/game/${g.id}`} style={{ textDecoration: "none", color: "inherit" }}>
               <div style={{ fontWeight: 800 }}>{g.game_date}</div>
-              <div style={{ marginTop: 4, color: "#444" }}>
-                vs {g.opponent ?? "（未入力）"}
-              </div>
+              <div style={{ marginTop: 4, color: "#444" }}>vs {g.opponent ?? "（未入力）"}</div>
               {g.memo && <div style={{ marginTop: 6, color: "#666" }}>{g.memo}</div>}
 
               {g.submitted_names?.length > 0 && (

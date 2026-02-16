@@ -26,8 +26,7 @@ export async function GET() {
       return NextResponse.json({ ok: true, games: [] });
     }
 
-    // 2) stats から「その試合に入力した人の名前」を JOIN で取る
-    // ※ stats.user_id -> users.id の外部キーがある前提
+    // 2) stats + users(display_name) をJOINで取る（外部キーがある前提）
     const { data: stats, error: statsErr } = await supabase
       .from("stats")
       .select("game_id, users(display_name)")
@@ -39,11 +38,9 @@ export async function GET() {
 
     // 3) game_id => submitted_names
     const submittedNamesByGameId: Record<string, string[]> = {};
-
     for (const row of stats ?? []) {
       const gid = String((row as any).game_id);
-      const name =
-        String((row as any).users?.display_name ?? "").trim() || "（名前未設定）";
+      const name = String((row as any).users?.display_name ?? "").trim() || "（名前未設定）";
 
       if (!submittedNamesByGameId[gid]) submittedNamesByGameId[gid] = [];
       submittedNamesByGameId[gid].push(name);

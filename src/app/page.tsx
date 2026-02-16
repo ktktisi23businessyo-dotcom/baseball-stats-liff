@@ -1,75 +1,33 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
-type Liff = {
-  init: (arg: { liffId: string }) => Promise<void>;
-  isLoggedIn: () => boolean;
-  login: () => void;
-  getProfile: () => Promise<{ userId: string; displayName: string }>;
+type Game = {
+  id: string;
+  game_date: string;
+  opponent: string | null;
+  memo: string | null;
+  submitted_names: string[];
 };
 
-declare global {
-  interface Window {
-    liff: Liff;
-  }
-}
-
 export default function Home() {
-  const [status, setStatus] = useState("起動中…");
-  const [userId, setUserId] = useState<string>("");
-  const [displayName, setDisplayName] = useState<string>("");
+  const [status, setStatus] = useState("読み込み中…");
+  const [games, setGames] = useState<Game[]>([]);
 
   useEffect(() => {
     (async () => {
       try {
-        const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
-
-        if (!liffId) {
-          setStatus("LIFF ID 未設定");
-          return;
-        }
-
-        if (!window.liff) {
-          setStatus("LIFF SDK読み込み失敗");
-          return;
-        }
-
-        setStatus("LIFF初期化中…");
-        await window.liff.init({ liffId });
-
-        if (!window.liff.isLoggedIn()) {
-          setStatus("LINEログインへ遷移します…");
-          window.liff.login();
-          return;
-        }
-
-        setStatus("プロフィール取得中…");
-        const profile = await window.liff.getProfile();
-
-        setUserId(profile.userId);
-        setDisplayName(profile.displayName);
-
-        // 🔥 ここからAPI経由で登録
-        setStatus("ユーザー登録中(API)…");
-
-        const res = await fetch("/api/upsert-user", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            line_user_id: profile.userId,
-            display_name: profile.displayName,
-          }),
-        });
-
+        const res = await fetch("/api/games");
         const json = await res.json().catch(() => ({}));
 
         if (!res.ok || !json.ok) {
-          setStatus("🔥API経由エラー🔥: " + (json.error ?? res.statusText));
+          setStatus("エラー: " + (json.error ?? res.statusText));
           return;
         }
 
-        setStatus("OK：LIFFログイン＆users登録できました ✅");
+        setGames((json.games ?? []) as Game[]);
+        setStatus("OK");
       } catch (e: any) {
         setStatus("例外: " + (e?.message ?? String(e)));
       }
@@ -77,17 +35,36 @@ export default function Home() {
   }, []);
 
   return (
-    <main style={{ padding: 20 }}>
-      <h1>LIFF 接続テスト</h1>
-      <p>{status}</p>
+    <main style={{ padding: 16 }}>
+      <h1 style={{ fontSize: 20, fontWeight: 800 }}>試合一覧</h1>
+      <p style={{ marginTop: 8 }}>{status}</p>
 
-      {userId && (
-        <div style={{ marginTop: 12 }}>
-          <div>userId: {userId}</div>
-          <div>displayName: {displayName}</div>
-        </div>
-      )}
+      <ul style={{ marginTop: 12, display: "grid", gap: 10 }}>
+        {games.map((g) => (
+          <li key={g.id} style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12 }}>
+            <Link href={`/game/${g.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+              <div style={{ fontWeight: 800 }}>{g.game_date}</div>
+              <div style={{ marginTop: 4, color: "#444" }}>
+                vs {g.opponent ?? "（未入力）"}
+              </div>
+              {g.memo && <div style={{ marginTop: 6, color: "#666" }}>{g.memo}</div>}
+
+              {g.submitted_names?.length > 0 && (
+                <div style={{ marginTop: 10, fontSize: 13 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>入力済み</div>
+                  <div style={{ color: "#333", lineHeight: 1.5 }}>
+                    {g.submitted_names.join(" / ")}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginTop: 10, color: "#0a66c2", fontWeight: 700 }}>
+                この試合の成績を入力 →
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </main>
   );
 }
-

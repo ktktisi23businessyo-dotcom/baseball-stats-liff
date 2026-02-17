@@ -157,6 +157,10 @@ export default function AdminPage() {
   return (
     <main style={{ padding: 16, display: "grid", gap: 14 }}>
       <h1 style={{ fontSize: 20, fontWeight: 800 }}>管理者：試合作成</h1>
+      <div style={{ background: "yellow", padding: 8, fontWeight: 900 }}>
+  ADMIN_ROUTER_PROBE: APP_ROUTER_OK_20260217
+</div>
+
       <div style={{ color: "red", fontWeight: 900 }}>ADMIN_BUILD_MARK: 20260217_03</div>
 
       <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12 }}>
